@@ -174,6 +174,7 @@
     SDWebImageDownloadToken *token = [[SDWebImageDownloader sharedDownloader]
                                       downloadImageWithURL:imageURL options:0 progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
                                           expect(error).notTo.beNil();
+                                          expect(error.domain).equal(SDWebImageErrorDomain);
                                           expect(error.code).equal(SDWebImageErrorCancelled);
                                       }];
     expect([SDWebImageDownloader sharedDownloader].currentDownloadCount).to.equal(1);
@@ -678,6 +679,53 @@
             expect(metric.isReusedConnection).beFalsy();
         }
         [expectation1 fulfill];
+    }];
+    
+    [self waitForExpectationsWithCommonTimeoutUsingHandler:^(NSError * _Nullable error) {
+        [downloader invalidateSessionAndCancel:YES];
+    }];
+}
+
+- (void)test27DownloadShouldCallbackWhenURLSessionRunning {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Downloader should callback when URLSessionTask running"];
+    
+    NSURL *url = [NSURL URLWithString: @"https://raw.githubusercontent.com/SDWebImage/SDWebImage/master/SDWebImage_logo.png"];
+    NSString *key = [SDWebImageManager.sharedManager cacheKeyForURL:url];
+    
+    [SDImageCache.sharedImageCache removeImageForKey:key withCompletion:^{
+        SDWebImageCombinedOperation *operation = [SDWebImageManager.sharedManager loadImageWithURL:url options:0 progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, SDImageCacheType cacheType, BOOL finished, NSURL * _Nullable imageURL) {
+            expect(error.domain).equal(SDWebImageErrorDomain);
+            expect(error.code).equal(SDWebImageErrorCancelled);
+            [expectation fulfill];
+        }];
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [operation cancel];
+        });
+    }];
+    
+    [self waitForExpectationsWithCommonTimeout];
+}
+
+- (void)test28ProgressiveDownloadShouldUseSameCoder  {
+    XCTestExpectation *expectation = [self expectationWithDescription:@"Progressive download should use the same coder for each animated image"];
+    SDWebImageDownloader *downloader = [[SDWebImageDownloader alloc] init];
+    
+    __block SDWebImageDownloadToken *token;
+    __block id<SDImageCoder> progressiveCoder;
+    token = [downloader downloadImageWithURL:[NSURL URLWithString:kTestGIFURL] options:SDWebImageDownloaderProgressiveLoad context:@{SDWebImageContextAnimatedImageClass : SDAnimatedImage.class} progress:nil completed:^(UIImage * _Nullable image, NSData * _Nullable data, NSError * _Nullable error, BOOL finished) {
+        expect(error).beNil();
+        expect([image isKindOfClass:SDAnimatedImage.class]).beTruthy();
+        id<SDImageCoder> coder = ((SDAnimatedImage *)image).animatedCoder;
+        if (!progressiveCoder) {
+            progressiveCoder = coder;
+        }
+        expect(progressiveCoder).equal(coder);
+        if (!finished) {
+            progressiveCoder = coder;
+        } else {
+            [expectation fulfill];
+        }
     }];
     
     [self waitForExpectationsWithCommonTimeoutUsingHandler:^(NSError * _Nullable error) {
